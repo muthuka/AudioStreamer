@@ -20,7 +20,7 @@
 #endif
 #else
 #import <Cocoa/Cocoa.h>
-#endif TARGET_OS_IPHONE			
+#endif //TARGET_OS_IPHONE
 
 #import <Foundation/Foundation.h>
 #include <pthread.h>
@@ -102,6 +102,8 @@ typedef enum
 } AudioStreamerErrorCode;
 
 extern NSString * const ASStatusChangedNotification;
+extern NSString * const ASStatusErrorNotification;
+extern NSString * const ASStatusErrorNotification;
 extern NSString * const ASPresentAlertWithTitleNotification;
 #ifdef SHOUTCAST_METADATA
 extern NSString * const ASUpdateMetadataNotification;

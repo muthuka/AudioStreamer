@@ -25,6 +25,7 @@
 #define BitRateEstimationMinPackets 50
 
 NSString * const ASStatusChangedNotification = @"ASStatusChangedNotification";
+NSString * const ASStatusErrorNotification = @"ASStatusErrorNotification";
 NSString * const ASPresentAlertWithTitleNotification = @"ASPresentAlertWithTitleNotification";
 #ifdef SHOUTCAST_METADATA
 NSString * const ASUpdateMetadataNotification = @"ASUpdateMetadataNotification";
@@ -122,7 +123,7 @@ void MyPropertyListenerProc(	void *							inClientData,
 								UInt32 *						ioFlags)
 {	
 	// this is called by audio file stream when it finds property values
-	AudioStreamer* streamer = (AudioStreamer *)inClientData;
+	AudioStreamer* streamer = (__bridge AudioStreamer *)inClientData;
 	[streamer
 		handlePropertyChangeForFileStream:inAudioFileStream
 		fileStreamPropertyID:inPropertyID
@@ -147,7 +148,7 @@ void MyPacketsProc(				void *							inClientData,
 								AudioStreamPacketDescription	*inPacketDescriptions)
 {
 	// this is called by audio file stream when it finds packets of audio
-	AudioStreamer* streamer = (AudioStreamer *)inClientData;
+	AudioStreamer* streamer = (__bridge AudioStreamer *)inClientData;
 	[streamer
 		handleAudioPackets:inInputData
 		numberBytes:inNumberBytes
@@ -170,7 +171,7 @@ void MyAudioQueueOutputCallback(	void*					inClientData,
 {
 	// this is called by the audio queue when it has finished decoding our data. 
 	// The buffer is now free to be reused.
-	AudioStreamer* streamer = (AudioStreamer*)inClientData;
+	AudioStreamer* streamer = (__bridge AudioStreamer*)inClientData;
 	[streamer handleBufferCompleteForQueue:inAQ buffer:inBuffer];
 }
 
@@ -183,7 +184,7 @@ void MyAudioQueueOutputCallback(	void*					inClientData,
 //
 void MyAudioQueueIsRunningCallback(void *inUserData, AudioQueueRef inAQ, AudioQueuePropertyID inID)
 {
-	AudioStreamer* streamer = (AudioStreamer *)inUserData;
+	AudioStreamer* streamer = (__bridge AudioStreamer *)inUserData;
 	[streamer handlePropertyChangeForQueue:inAQ propertyID:inID];
 }
 
@@ -218,7 +219,7 @@ void ASReadStreamCallBack
    void* inClientInfo
 )
 {
-	AudioStreamer* streamer = (AudioStreamer *)inClientInfo;
+	AudioStreamer* streamer = (__bridge AudioStreamer *)inClientInfo;
 	[streamer handleReadFromStream:aStream eventType:eventType];
 }
 
@@ -242,7 +243,7 @@ void ASReadStreamCallBack
 	self = [super init];
 	if (self != nil)
 	{
-		url = [aURL retain];
+		url = aURL;
 #ifdef SHOUTCAST_METADATA
 		metaDataString = [[NSMutableString alloc] initWithString:@""];
 #endif
@@ -258,11 +259,6 @@ void ASReadStreamCallBack
 - (void)dealloc
 {
 	[self stop];
-	[url release];
-#ifdef SHOUTCAST_METADATA
-	[metaDataString release];
-#endif
-	[super dealloc];
 }
 
 //
@@ -445,6 +441,9 @@ void ASReadStreamCallBack
 			AudioQueueStop(audioQueue, true);
 		}
 
+        NSNotification *notification = [NSNotification notificationWithName:ASStatusErrorNotification object:self];
+        [[NSNotificationCenter defaultCenter] postNotification:notification];
+        
 		[self presentAlertWithTitle:NSLocalizedStringFromTable(@"File Error", @"Errors", nil)
 							message:NSLocalizedStringFromTable(@"Unable to configure network read stream.", @"Errors", nil)];
 	}
@@ -677,7 +676,7 @@ void ASReadStreamCallBack
 		//
 		// Create the HTTP GET request
 		//
-		CFHTTPMessageRef message= CFHTTPMessageCreateRequest(NULL, (CFStringRef)@"GET", (CFURLRef)url, kCFHTTPVersion1_1);
+		CFHTTPMessageRef message= CFHTTPMessageCreateRequest(NULL, (CFStringRef)@"GET", (__bridge CFURLRef)url, kCFHTTPVersion1_1);
 #ifdef SHOUTCAST_METADATA
 		CFHTTPMessageSetHeaderFieldValue(message, CFSTR("icy-metadata"), CFSTR("1"));
 #endif
@@ -688,7 +687,7 @@ void ASReadStreamCallBack
 		if (fileLength > 0 && seekByteOffset > 0)
 		{
 			CFHTTPMessageSetHeaderFieldValue(message, CFSTR("Range"),
-				(CFStringRef)[NSString stringWithFormat:@"bytes=%ld-%ld", seekByteOffset, fileLength - 1]);
+				(__bridge CFStringRef)[NSString stringWithFormat:@"bytes=%ld-%ld", seekByteOffset, fileLength - 1]);
 			discontinuous = vbr;
 		}
 		
@@ -726,7 +725,7 @@ void ASReadStreamCallBack
 					[NSNull null], kCFStreamSSLPeerName,
 				nil];
 
-			CFReadStreamSetProperty(stream, kCFStreamPropertySSLSettings, sslSettings);
+			CFReadStreamSetProperty(stream, kCFStreamPropertySSLSettings, (__bridge CFTypeRef)(sslSettings));
 		}
 		
 		//
@@ -748,7 +747,7 @@ void ASReadStreamCallBack
 		//
 		// Set our callback function to receive the data
 		//
-		CFStreamClientContext context = {0, self, NULL, NULL, NULL};
+		CFStreamClientContext context = {0, (__bridge void *)(self), NULL, NULL, NULL};
 		CFReadStreamSetClient(
 			stream,
 			kCFStreamEventHasBytesAvailable | kCFStreamEventErrorOccurred | kCFStreamEventEndEncountered,
@@ -787,8 +786,6 @@ void ASReadStreamCallBack
 //
 - (void)startInternal
 {
-	NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-
 	@synchronized(self)
 	{
 		if (state != AS_STARTING_FILE_THREAD)
@@ -799,7 +796,6 @@ void ASReadStreamCallBack
 				NSLog(@"### Not starting audio thread. State code is: %ld", state);
 			}
 			self.state = AS_INITIALIZED;
-			[pool release];
 			return;
 		}
 		
@@ -812,7 +808,7 @@ void ASReadStreamCallBack
 			NULL,                          // 'NULL' to use the default (main) run loop
 			NULL,                          // 'NULL' to use the default run loop mode
 			MyAudioSessionInterruptionListener,  // a reference to your interruption callback
-			self                       // data to pass to your interruption listener callback
+			(__bridge void *)(self)                       // data to pass to your interruption listener callback
 		);
 		UInt32 sessionCategory = kAudioSessionCategory_MediaPlayback;
 		AudioSessionSetProperty (
@@ -915,7 +911,6 @@ cleanup:
 		AudioSessionSetActive(false);
 #endif
 
-		[httpHeaders release];
 		httpHeaders = nil;
 
 		bytesFilled = 0;
@@ -924,11 +919,8 @@ cleanup:
 		packetBufferSize = 0;
 		self.state = AS_INITIALIZED;
 
-		[internalThread release];
 		internalThread = nil;
 	}
-
-	[pool release];
 }
 
 //
@@ -949,7 +941,7 @@ cleanup:
 			NSAssert([[NSThread currentThread] isEqual:[NSThread mainThread]],
 				@"Playback can only be started from the main thread.");
 			notificationCenter =
-				[[NSNotificationCenter defaultCenter] retain];
+				[NSNotificationCenter defaultCenter];
 			self.state = AS_STARTING_FILE_THREAD;
 			internalThread =
 				[[NSThread alloc]
@@ -1411,7 +1403,7 @@ cleanup:
 			CFTypeRef message =
 				CFReadStreamCopyProperty(stream, kCFStreamPropertyHTTPResponseHeader);
 			httpHeaders =
-				(NSDictionary *)CFHTTPMessageCopyAllHeaderFields((CFHTTPMessageRef)message);
+				(__bridge NSDictionary *)CFHTTPMessageCopyAllHeaderFields((CFHTTPMessageRef)message);
 			CFRelease(message);
 			//NSLog(@"headers %@", httpHeaders);
 
@@ -1436,7 +1428,7 @@ cleanup:
 				[AudioStreamer hintForMIMEType:[httpHeaders objectForKey:@"Content-Type"]];
 
 			// create an audio file stream parser
-			err = AudioFileStreamOpen(self, MyPropertyListenerProc, MyPacketsProc, 
+			err = AudioFileStreamOpen((__bridge void *)(self), MyPropertyListenerProc, MyPacketsProc,
 									fileTypeHint, &audioFileStream);
 			if (err)
 			{
@@ -1491,7 +1483,7 @@ cleanup:
 				if (statusCode == 200)		// "OK" (this is true even for ICY)
 				{
 					// check if this is a ICY 200 OK response
-					NSString *icyCheck = [[[NSString alloc] initWithBytes:bytes length:10 encoding:NSUTF8StringEncoding] autorelease];
+					NSString *icyCheck = [[NSString alloc] initWithBytes:bytes length:10 encoding:NSUTF8StringEncoding];
 					//NSLog(@"stream bytes %@", [NSString stringWithCString:bytes length:length]); // dataWithBytes:bytes length:1024]);
 					if (icyCheck != nil && [icyCheck caseInsensitiveCompare:@"ICY 200 OK"] == NSOrderedSame)	
 					{
@@ -1502,7 +1494,7 @@ cleanup:
 					{
 						// is Live365?
 						// get all the headers
-						NSDictionary *reqHeaders = [(NSDictionary *)CFHTTPMessageCopyAllHeaderFields(myResponse) autorelease];
+						NSDictionary *reqHeaders = (__bridge NSDictionary *)CFHTTPMessageCopyAllHeaderFields(myResponse);
 						//NSLog(@"reqHeaders: %@", reqHeaders);
 						NSString *serverHeader = [reqHeaders valueForKey:@"Server"];
 						if (serverHeader != nil && NSEqualRanges([serverHeader rangeOfString:@"Nanocaster"], NSMakeRange(0, 10))) {
@@ -1521,9 +1513,9 @@ cleanup:
 							NSString *metaInt;
 							NSString *contentType;
 							NSString *icyBr;
-							metaInt = (NSString *) CFHTTPMessageCopyHeaderFieldValue(myResponse, CFSTR("Icy-Metaint"));
-							contentType = (NSString *) CFHTTPMessageCopyHeaderFieldValue(myResponse, CFSTR("Content-Type"));
-							icyBr = (NSString *) CFHTTPMessageCopyHeaderFieldValue(myResponse, CFSTR("icy-br"));
+							metaInt = (__bridge NSString *) CFHTTPMessageCopyHeaderFieldValue(myResponse, CFSTR("Icy-Metaint"));
+							contentType = (__bridge NSString *) CFHTTPMessageCopyHeaderFieldValue(myResponse, CFSTR("Content-Type"));
+							icyBr = (__bridge NSString *) CFHTTPMessageCopyHeaderFieldValue(myResponse, CFSTR("icy-br"));
 							/*if (contentType) 
 							{
 								// only if we haven't already set a content-type
@@ -1587,7 +1579,7 @@ cleanup:
 					if (c1 == '\r' && c2 == '\n')
 					{		
 						// get the full string
-						NSString *fullString = [[[NSString alloc] initWithBytes:bytes length:streamStart encoding:NSUTF8StringEncoding] autorelease];
+						NSString *fullString = [[NSString alloc] initWithBytes:bytes length:streamStart encoding:NSUTF8StringEncoding];
 						
 						// get the substring for this line
 						NSString *line = [fullString substringWithRange:NSMakeRange(lineStart, (streamStart-lineStart))];
@@ -1902,7 +1894,7 @@ cleanup:
 	numberOfChannels = asbd.mChannelsPerFrame;
 	
 	// create the audio queue
-	err = AudioQueueNewOutput(&asbd, MyAudioQueueOutputCallback, self, NULL, NULL, 0, &audioQueue);
+	err = AudioQueueNewOutput(&asbd, MyAudioQueueOutputCallback, (__bridge void *)(self), NULL, NULL, 0, &audioQueue);
 	if (err)
 	{
 		[self failWithErrorCode:AS_AUDIO_QUEUE_CREATION_FAILED];
@@ -1911,7 +1903,7 @@ cleanup:
 	
 	// start the queue if it has not been started already
 	// listen to the "isRunning" property
-	err = AudioQueueAddPropertyListener(audioQueue, kAudioQueueProperty_IsRunning, MyAudioQueueIsRunningCallback, self);
+	err = AudioQueueAddPropertyListener(audioQueue, kAudioQueueProperty_IsRunning, MyAudioQueueIsRunningCallback, (__bridge void *)(self));
 	if (err)
 	{
 		[self failWithErrorCode:AS_AUDIO_QUEUE_ADD_LISTENER_FAILED];
@@ -2346,7 +2338,6 @@ cleanup:
 - (void)handlePropertyChangeForQueue:(AudioQueueRef)inAQ
 	propertyID:(AudioQueuePropertyID)inID
 {
-	NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
 	@synchronized(self)
 	{
 		if (inID == kAudioQueueProperty_IsRunning)
@@ -2390,11 +2381,12 @@ cleanup:
 			else
 			{
 				NSLog(@"AudioQueue changed state in unexpected way.");
+                NSNotification *notification = [NSNotification notificationWithName:ASStatusErrorNotification object:self];
+                [[NSNotificationCenter defaultCenter] postNotification:notification];
+
 			}
 		}
 	}
-	
-	[pool release];
 }
 
 #if TARGET_OS_IPHONE

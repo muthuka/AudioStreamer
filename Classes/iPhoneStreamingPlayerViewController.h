@@ -34,8 +34,8 @@
 	NSString *currentTitle;
 }
 
-@property (retain) NSString* currentArtist;
-@property (retain) NSString* currentTitle;
+@property (strong) NSString* currentArtist;
+@property (strong) NSString* currentTitle;
 
 - (IBAction)buttonPressed:(id)sender;
 - (void)spinButton;
